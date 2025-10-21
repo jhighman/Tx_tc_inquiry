@@ -25,6 +25,43 @@ class ParsingConfig(BaseModel):
     Configuration for parsing.
     """
 
+    # HTML parsing options
+    use_html_parser: bool = True  # Whether to attempt HTML-based parsing first
+    use_enhanced_html_parser: bool = True  # Whether to use enhanced HTML parser with multiple extraction methods
+    html_conversion_methods: List[str] = [  # Preferred order of HTML conversion methods
+        "pdfplumber",
+        "pdftohtml",
+        "pymupdf"
+    ]
+    
+    # Enhanced HTML parser extraction methods (in order of preference)
+    enhanced_extraction_methods: List[str] = [
+        "tabula",      # tabula-py for table extraction
+        "camelot",     # camelot-py for table extraction
+        "pymupdf_positioned",  # PyMuPDF with positioned text parsing
+        "pdfplumber_enhanced", # Enhanced pdfplumber with multiple strategies
+        "pdftohtml",   # pdftohtml command-line tool
+    ]
+    
+    # Table extraction settings
+    table_extraction_strategies: dict = {
+        "tabula": {
+            "lattice": True,
+            "stream": True,
+            "multiple_tables": True,
+            "pages": "all"
+        },
+        "camelot": {
+            "lattice": True,
+            "stream": True
+        },
+        "pdfplumber": {
+            "vertical_strategy": ["lines", "text", "explicit"],
+            "horizontal_strategy": ["lines", "text", "explicit"]
+        }
+    }
+    
+    # Text parsing options (fallback)
     name_regex_strict: bool = True  # Whether to use strict name regex
     allow_two_line_id_date: bool = True  # Support ID and date on separate lines
     header_patterns: List[str] = [  # Patterns to identify headers/footers

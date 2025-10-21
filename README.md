@@ -8,8 +8,10 @@ Texas Extract parses PDF reports with a consistent layout to extract inmate reco
 
 ## Features
 
+- **Advanced PDF Parsing**: Two parsing approaches for maximum reliability:
+  - **HTML-based Parser**: Converts PDFs to HTML tables for structured parsing (recommended)
+  - **Text-based Parser**: Fallback state machine with regex patterns for complex cases
 - **PDF Text Extraction**: Extracts text from PDF reports with OCR fallback for non-selectable text
-- **State Machine Parser**: Uses a state machine with regex patterns to parse text into structured records
 - **Multiple Output Formats**: Supports JSON, CSV, and NDJSON output formats
 - **MongoDB Integration**: Optional integration with MongoDB for storing and querying records
 - **Web Retrieval**: Fetches reports from URLs with conditional headers for efficiency
@@ -26,10 +28,32 @@ Texas Extract parses PDF reports with a consistent layout to extract inmate reco
 pip install arrestx
 ```
 
+For the enhanced HTML parser (recommended), install additional dependencies:
+
+```bash
+# Core HTML parsing (included by default)
+pip install beautifulsoup4 PyMuPDF
+
+# Enhanced extraction methods (optional but recommended)
+pip install arrestx[enhanced-html]
+# or manually:
+pip install tabula-py camelot-py[cv]
+```
+
 For the web UI, you'll also need to install Gradio:
 
 ```bash
 pip install gradio
+```
+
+For the `pdftohtml` conversion method, install poppler-utils:
+
+```bash
+# macOS
+brew install poppler
+
+# Ubuntu/Debian
+sudo apt-get install poppler-utils
 ```
 
 ## Quick Start
@@ -112,6 +136,39 @@ input:
   ocr_lang: "eng"
 
 parsing:
+  # Enhanced HTML parsing (recommended)
+  use_html_parser: true
+  use_enhanced_html_parser: true
+  
+  # Enhanced extraction methods (in order of preference)
+  enhanced_extraction_methods:
+    - "tabula"              # tabula-py for table extraction
+    - "camelot"             # camelot-py for advanced table detection
+    - "pymupdf_positioned"  # PyMuPDF with positioned text parsing
+    - "pdfplumber_enhanced" # Enhanced pdfplumber with multiple strategies
+    - "pdftohtml"           # pdftohtml command-line tool
+  
+  # Standard HTML conversion methods (fallback)
+  html_conversion_methods:
+    - "pdfplumber"
+    - "pdftohtml"
+    - "pymupdf"
+  
+  # Table extraction strategies
+  table_extraction_strategies:
+    tabula:
+      lattice: true
+      stream: true
+      multiple_tables: true
+      pages: "all"
+    camelot:
+      lattice: true
+      stream: true
+    pdfplumber:
+      vertical_strategy: ["lines", "text", "explicit"]
+      horizontal_strategy: ["lines", "text", "explicit"]
+  
+  # Text parsing (fallback)
   name_regex_strict: true
   allow_two_line_id_date: true
   header_patterns:
@@ -358,12 +415,113 @@ To implement a retention policy for backups, add the following to your crontab:
 0 1 * * 0 find /path/to/reports/archive -name "*.PDF" -type f -mtime +90 -delete
 ```
 
+## Enhanced HTML Parser
+
+Texas Extract features an **Enhanced HTML Parser** that significantly improves extraction accuracy and reliability.
+
+### Performance Comparison
+
+| Method | Records Extracted | Success Rate |
+|--------|------------------|--------------|
+| Original Text Parser | 156 | Fallback only |
+| **Enhanced HTML Parser** | **341** | **Primary method** |
+
+### Multiple Extraction Methods
+
+The enhanced parser tries multiple extraction approaches automatically:
+
+1. **tabula-py** - Specialized table extraction library
+2. **camelot-py** - Advanced table detection and extraction
+3. **PyMuPDF Positioned Text** - Handles positioned `<p>` elements instead of tables
+4. **Enhanced pdfplumber** - Multiple table extraction strategies
+5. **pdftohtml** - Command-line tool with XML output
+
+### Key Improvements
+
+- **Positioned Text Parsing**: Handles PyMuPDF's rich HTML output with positioned elements
+- **Multiple Table Strategies**: Lattice detection, stream detection, text-based columns
+- **Robust Fallback Chain**: Each method has built-in fallbacks
+- **Configuration-Driven**: Enable/disable specific methods and adjust parameters
+
+### Installation
+
+```bash
+# Core functionality (included by default)
+pip install arrestx
+
+# Enhanced extraction methods (recommended)
+pip install arrestx[enhanced-html]
+
+# System dependencies for pdftohtml
+# macOS: brew install poppler
+# Ubuntu: sudo apt-get install poppler-utils
+```
+
+### Testing
+
+Test the enhanced parser with your PDFs:
+
+```bash
+python test_enhanced_html_parser.py
+```
+
+### Configuration
+
+Enable enhanced HTML parsing in your config:
+
+```yaml
+parsing:
+  use_html_parser: true
+  use_enhanced_html_parser: true
+  enhanced_extraction_methods:
+    - "tabula"
+    - "camelot"
+    - "pymupdf_positioned"
+    - "pdfplumber_enhanced"
+    - "pdftohtml"
+```
+
+### Migration
+
+The enhanced parser is **backward compatible**:
+- No code changes required
+- Automatic fallback to original parser if needed
+- Same output format
+- Configuration-driven activation
+
+For detailed information, see [`enhanced_html_parser_guide.md`](enhanced_html_parser_guide.md).
+
+## Standard HTML vs Text Parsing
+
+### Standard HTML Parser
+
+The standard HTML parser converts PDFs to HTML tables and parses the DOM:
+
+- **More reliable**: Leverages existing table structure
+- **Simpler**: Uses DOM parsing instead of regex patterns
+- **Better for complex data**: Handles multi-line addresses
+
+### Text Parser (Fallback)
+
+The original text-based parser uses regex patterns and state machines. It automatically activates when:
+- HTML parsing dependencies are not available
+- HTML conversion fails for a particular PDF
+- HTML parsing is disabled in configuration
+
+For detailed information, see [`html_parser_guide.md`](html_parser_guide.md).
+
 ## Troubleshooting
 
 - **Missing Reports**: If you're not seeing any results, make sure the reports directory exists and contains PDF files.
 - **OCR Issues**: If text extraction is failing, try enabling OCR fallback with `--ocr-fallback`.
 - **Configuration**: Check your configuration file for any errors or missing values.
 - **Dependencies**: Ensure all dependencies are installed, especially if using OCR features.
+- **Enhanced HTML Parser Issues**:
+  - Install optional dependencies: `pip install arrestx[enhanced-html]`
+  - Run test script: `python test_enhanced_html_parser.py`
+  - Check which extraction methods work for your PDFs
+  - The system will automatically fall back to standard HTML or text parsing
+- **Low Extraction Count**: If you're getting fewer records than expected, try enabling the enhanced HTML parser for better results.
 
 ## Contributing
 

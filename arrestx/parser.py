@@ -10,6 +10,13 @@ from arrestx.log import get_logger
 from arrestx.model import Charge, ParserState, ParseError, Record
 from arrestx.pdfio import extract_lines_from_pdf, preprocess_lines
 
+# Try to import HTML parser
+try:
+    from arrestx.html_parser import parse_pdf_via_html
+    HTML_PARSER_AVAILABLE = True
+except ImportError:
+    HTML_PARSER_AVAILABLE = False
+
 logger = get_logger(__name__)
 
 # Regex patterns
@@ -171,6 +178,43 @@ def add_or_merge_charge(charges: List[Dict[str, str]], booking_no: str, desc: st
 def parse_pdf(path: str, cfg: Config) -> List[Record]:
     """
     Parse a PDF file and extract records.
+    
+    This function tries multiple parsing approaches in order of preference:
+    1. HTML-based parsing (most reliable for structured tables)
+    2. Text-based parsing (fallback for when HTML parsing fails)
+    
+    Args:
+        path: Path to the PDF file
+        cfg: Configuration
+        
+    Returns:
+        List of extracted records
+    """
+    # Check if HTML parsing should be attempted
+    use_html_parser = getattr(cfg.parsing, 'use_html_parser', True)
+    
+    if use_html_parser and HTML_PARSER_AVAILABLE:
+        try:
+            logger.info("Attempting HTML-based parsing")
+            records = parse_pdf_via_html(path, cfg)
+            
+            # Validate that we got reasonable results
+            if records and len(records) > 0:
+                logger.info(f"HTML parsing successful: extracted {len(records)} records")
+                return post_process_records(records)
+            else:
+                logger.warning("HTML parsing returned no records, falling back to text parsing")
+        except Exception as e:
+            logger.warning(f"HTML parsing failed: {e}, falling back to text parsing")
+    
+    # Fallback to text-based parsing
+    logger.info("Using text-based parsing")
+    return parse_pdf_text_based(path, cfg)
+
+
+def parse_pdf_text_based(path: str, cfg: Config) -> List[Record]:
+    """
+    Parse a PDF file using the original text-based approach.
     
     Args:
         path: Path to the PDF file
