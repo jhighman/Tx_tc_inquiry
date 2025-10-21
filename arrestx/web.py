@@ -187,10 +187,8 @@ def process_daily_report(url: str, config: Config) -> Dict[str, Union[str, int]]
         "message": "",
     }
     
-    # Determine output path
-    output_dir = os.path.dirname(config.output.json_path or config.output.csv_path or "")
-    if not output_dir:
-        output_dir = "./reports"
+    # PDF reports should always go to the reports directory
+    output_dir = "reports"
     
     # Create reports directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)

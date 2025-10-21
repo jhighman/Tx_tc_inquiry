@@ -36,14 +36,16 @@ def setup_logging(level: str = "INFO") -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-def search_handler(name: str, config_path: str = "config.yaml", force_update: bool = False) -> Tuple[str, str]:
+def search_handler(name: str, force_update: bool = False, person_bio: str = "", organization: str = "", enterprise_format: bool = False) -> Tuple[str, str]:
     """
     Handle search requests.
     
     Args:
         name: Name to search for
-        config_path: Path to configuration file
         force_update: Force update of the report
+        person_bio: Optional person bio identifier for correlation
+        organization: Optional organization identifier for correlation
+        enterprise_format: Whether to use enterprise event format
         
     Returns:
         Tuple of (alerts_html, raw_json)
@@ -52,17 +54,24 @@ def search_handler(name: str, config_path: str = "config.yaml", force_update: bo
         return "Please enter a name to search for.", "{}"
     
     try:
-        # Load configuration
-        config = load_config(config_path)
+        # Load default configuration
+        config = load_config("config.yaml")
+        
+        # Convert empty strings to None for optional parameters
+        person_bio_param = person_bio.strip() if person_bio.strip() else None
+        organization_param = organization.strip() if organization.strip() else None
         
         # Search for the name
-        result = search_name(name, config, force_update)
+        result = search_name(name, config, force_update, person_bio_param, organization_param)
         
         # Generate alerts HTML
         alerts_html = generate_alerts_html(result)
         
-        # Generate raw JSON
-        raw_json = json.dumps(result.to_dict(), indent=2)
+        # Generate JSON in requested format
+        if enterprise_format:
+            raw_json = json.dumps(result.to_enterprise_format(), indent=2)
+        else:
+            raw_json = json.dumps(result.to_dict(), indent=2)
         
         return alerts_html, raw_json
     except Exception as e:
@@ -121,16 +130,31 @@ def create_ui() -> gr.Blocks:
                     placeholder="Enter name (First Middle Last or Last, First Middle)",
                     info="Enter the name you want to search for"
                 )
-                config_input = gr.Textbox(
-                    label="Config Path",
-                    value="config.yaml",
-                    info="Path to configuration file"
-                )
-                force_update = gr.Checkbox(
-                    label="Force Update",
-                    value=False,
-                    info="Force update of the report even if it's current"
-                )
+                
+                with gr.Row():
+                    person_bio_input = gr.Textbox(
+                        label="Person Bio ID",
+                        placeholder="Optional identifier for correlation",
+                        info="Optional: Person bio identifier for tracking by calling system"
+                    )
+                    organization_input = gr.Textbox(
+                        label="Organization",
+                        placeholder="Optional organization identifier",
+                        info="Optional: Organization identifier for correlation"
+                    )
+                
+                with gr.Row():
+                    force_update = gr.Checkbox(
+                        label="Force Update",
+                        value=False,
+                        info="Force update of the report even if it's current"
+                    )
+                    enterprise_format = gr.Checkbox(
+                        label="Enterprise Format",
+                        value=False,
+                        info="Output JSON in enterprise event format"
+                    )
+                
                 search_button = gr.Button("Search", variant="primary")
         
         with gr.Tabs():
@@ -141,7 +165,7 @@ def create_ui() -> gr.Blocks:
         
         search_button.click(
             fn=search_handler,
-            inputs=[name_input, config_input, force_update],
+            inputs=[name_input, force_update, person_bio_input, organization_input, enterprise_format],
             outputs=[alerts_output, json_output]
         )
         
@@ -149,7 +173,7 @@ def create_ui() -> gr.Blocks:
         ## How to Use
         
         1. Enter a name in the search box (either "First Middle Last" or "Last, First Middle" format)
-        2. Optionally, provide a path to a custom configuration file
+        2. Optionally, check "Force Update" to refresh the report data
         3. Click the "Search" button
         4. View the results in the "Alerts" and "Raw JSON" tabs
         

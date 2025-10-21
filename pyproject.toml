@@ -30,7 +30,7 @@ dev = [
 ]
 
 [project.scripts]
-arrestx = "arrestx.cli:entry_point"
+arrestx = "arrestx.cli:main"
 
 [tool.setuptools]
 packages = ["arrestx"]

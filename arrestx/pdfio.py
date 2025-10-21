@@ -306,9 +306,38 @@ def preprocess_lines(lines_per_page: List[List[str]], cfg: Config) -> List[str]:
                 logger.debug(f"Skipping header/footer: {line}")
                 continue
             
-            # Process columnar data
+            # Process columnar data or fragmented data
             if " | " in line:
                 processed_lines.extend(process_columnar_line(line))
+            elif re.match(r'^[A-Z0-9\s/\-]+$', line) and len(line.split()) > 5:
+                # This might be fragmented data without pipes (e.g., "A S S A U L T F A M")
+                # Try to reconstruct it
+                reconstructed = line.replace(' ', '')
+                
+                # Look for booking number pattern
+                booking_match = re.search(r'(\d{2}-?\d{6,7})', reconstructed)
+                if booking_match:
+                    booking_no = booking_match.group(1)
+                    if '-' not in booking_no and len(booking_no) == 8:
+                        # Add the missing dash (e.g., "25024154" -> "25-024154")
+                        booking_no = f"{booking_no[:2]}-{booking_no[2:]}"
+                    processed_lines.append(booking_no)
+                    # Remove the booking number and add remaining text
+                    remaining = reconstructed[:booking_match.start()] + reconstructed[booking_match.end():]
+                    if remaining.strip():
+                        processed_lines.append(remaining)
+                else:
+                    # Look for identifier + date pattern
+                    id_date_match = re.search(r'(\d{6,8})(\d{1,2}/\d{1,2}/\d{4})', reconstructed)
+                    if id_date_match:
+                        processed_lines.append(f"{id_date_match.group(1)} {id_date_match.group(2)}")
+                        # Add any remaining text
+                        remaining = reconstructed[:id_date_match.start()] + reconstructed[id_date_match.end():]
+                        if remaining.strip():
+                            processed_lines.append(remaining)
+                    else:
+                        # Just add the reconstructed line
+                        processed_lines.append(reconstructed)
             else:
                 # Add line to processed lines
                 processed_lines.append(line)
@@ -323,6 +352,9 @@ def process_columnar_line(line: str) -> List[str]:
     """
     Process a line that contains columnar data.
     
+    This function handles both proper columnar data and fragmented data
+    where individual characters or small fragments are separated by " | ".
+    
     Args:
         line: Line with columnar data separated by " | "
         
@@ -330,15 +362,59 @@ def process_columnar_line(line: str) -> List[str]:
         List of processed lines
     """
     # Split the line by the column separator
-    columns = line.split(" | ")
+    columns = [col.strip() for col in line.split(" | ") if col.strip()]
     
-    # Process each column
+    # If we have many small fragments, try to reconstruct them
+    if len(columns) > 5 and all(len(col) <= 3 for col in columns[:10]):
+        # This looks like fragmented data - reconstruct it with spaces preserved
+        reconstructed = " ".join(columns)
+        
+        # Try to identify patterns in the reconstructed data
+        processed_lines = []
+        
+        # Look for identifier + date pattern (e.g., "0 9 8 6 6 9 6 1 0 / 2 0 / 2 0 2 5")
+        # First try to find date pattern and work backwards for identifier
+        date_match = re.search(r"(\d+)\s*/\s*(\d+)\s*/\s*(\d{4})", reconstructed)
+        if date_match:
+            # Extract the date components
+            month = date_match.group(1).replace(" ", "")
+            day = date_match.group(2).replace(" ", "")
+            year = date_match.group(3).replace(" ", "")
+            
+            # Look for identifier before the date (sequence of digits)
+            before_date = reconstructed[:date_match.start()].strip()
+            id_match = re.search(r"(\d+(?:\s+\d+)*)\s*$", before_date)
+            if id_match:
+                identifier = id_match.group(1).replace(" ", "")
+                # Ensure identifier is reasonable length (6-8 digits)
+                if 6 <= len(identifier) <= 8:
+                    processed_lines.append(f"{identifier} {month}/{day}/{year}")
+                    # Remove the matched parts
+                    reconstructed = reconstructed[:id_match.start()] + reconstructed[date_match.end():]
+        
+        # Look for booking number pattern (e.g., "2 5 - 0 2 4 1 5 5 4")
+        booking_match = re.search(r"(\d+)\s*-\s*(\d+(?:\s+\d+)*)", reconstructed)
+        if booking_match:
+            booking_prefix = booking_match.group(1).replace(" ", "")
+            booking_suffix = booking_match.group(2).replace(" ", "")
+            booking_no = f"{booking_prefix}-{booking_suffix}"
+            processed_lines.append(booking_no)
+            # Remove the matched part
+            reconstructed = reconstructed[:booking_match.start()] + reconstructed[booking_match.end():]
+        
+        # Clean up remaining text by removing excessive spaces and add as charge description
+        if reconstructed.strip():
+            # Remove extra spaces but preserve word boundaries
+            cleaned = re.sub(r'\s+', ' ', reconstructed.strip())
+            if len(cleaned) > 3:
+                processed_lines.append(cleaned)
+        
+        return processed_lines
+    
+    # Process each column normally for proper columnar data
     processed_lines = []
     
     for column in columns:
-        if not column.strip():
-            continue
-            
         # Check if this column contains a booking number
         booking_match = re.match(r"^(\d{2}-\d{6,7})\s+(.+)$", column)
         if booking_match:

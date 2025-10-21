@@ -73,10 +73,19 @@ def process_command(args: argparse.Namespace) -> int:
             return 1
     elif args.command == "search":
         # Search for a name in arrest records
-        result = search_name(args.name, config, args.force_update)
+        result = search_name(
+            args.name,
+            config,
+            args.force_update,
+            getattr(args, 'person_bio', None),
+            getattr(args, 'organization', None)
+        )
         
         # Print the result
-        if args.json:
+        if args.enterprise:
+            # Output in enterprise event format
+            print(json.dumps(result.to_enterprise_format(), indent=2))
+        elif args.json:
             # Output as JSON
             print(json.dumps(result.to_dict(), indent=2))
         else:
@@ -159,6 +168,9 @@ def main() -> int:
     search_parser.add_argument("name", help="Name to search for (First Middle Last or Last, First Middle)")
     search_parser.add_argument("--force-update", action="store_true", help="Force update of the report")
     search_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    search_parser.add_argument("--enterprise", action="store_true", help="Output in enterprise event format")
+    search_parser.add_argument("--person-bio", help="Optional person bio identifier for correlation")
+    search_parser.add_argument("--organization", help="Optional organization identifier for correlation")
     
     args = parser.parse_args()
     
