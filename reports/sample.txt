@@ -1,0 +1,39 @@
+Daily Booked In Report
+Report Date: 10/20/2025
+Page: 1 of 2
+
+Inmates Booked In During the Past 24 Hours
+
+Inmate Name                Identifier      CID         Book In Date    Booking No.    Description
+
+SMITH, JOHN                12345678        1063442     10/20/2025      25-0123456     THEFT
+                                                                                      PROPERTY > $2,500 < $30,000
+
+123 MAIN ST
+FORT WORTH, TX 76102
+
+JONES, MARY                87654321        2074553     10/20/2025      25-0123457     ASSAULT
+                                                                                      BODILY INJURY
+
+456 OAK ST
+DALLAS, TX 75201
+
+JOHNSON, MIKE              7654321         3085664     10/20/2025      25-0123458     DWI
+                                                                                      BAC >= 0.15
+
+789 PINE ST
+AUSTIN, TX 78701
+
+Page: 2 of 2
+
+WILLIAMS, SARAH            54321678        4096775     10/20/2025      25-0123459     POSSESSION
+                                                                                      CONTROLLED SUBSTANCE PG 1 < 1G
+
+321 CEDAR ST
+HOUSTON, TX 77002
+
+BROWN, DAVID               65432187        5107886     10/20/2025      25-0123460     BURGLARY
+                                                                                      OF HABITATION
+
+654 MAPLE ST
+SAN ANTONIO, TX 78205

@@ -1,0 +1,34 @@
+input:
+  paths: ["./reports/*.pdf"]
+  ocr_fallback: false
+  ocr_lang: "eng"
+
+parsing:
+  name_regex_strict: true
+  allow_two_line_id_date: true
+  header_patterns:
+    - "^Inmates Booked In.*"
+    - "^Report Date:.*"
+    - "^Page\\s+\\d+.*"
+
+output:
+  json_path: "./out/arrests.json"
+  csv_path: "./out/arrests.csv"
+  ndjson_path: null
+  pretty_json: true
+
+db:
+  enabled: false
+  uri: "mongodb://localhost:27017"
+  database: "arrests_db"
+  tenant: "TRUA"
+
+logging:
+  level: "INFO"
+  emit_warnings_in_record: true
+
+performance:
+  parallel_pages: true
+
+web_retrieval:
+  url: "https://cjreports.tarrantcounty.com/Reports/JailedInmates/FinalPDF/01.PDF"
