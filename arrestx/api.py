@@ -59,19 +59,22 @@ class SearchResult:
         
     def to_dict(self) -> Dict[str, Any]:
         """Convert search result to dictionary."""
-        result = {
+        result = {}
+        
+        # Add optional correlation identifiers first if provided
+        if self.person_bio is not None:
+            result["person_bio"] = self.person_bio
+        if self.organization is not None:
+            result["organization"] = self.organization
+        
+        # Add the rest of the fields
+        result.update({
             "name": self.name,
             "alerts": [alert.to_dict() for alert in self.alerts],
             "records_checked": self.records_checked,
             "last_update": self.last_update.isoformat() if self.last_update else None,
             "due_diligence_message": self.get_due_diligence_message()
-        }
-        
-        # Add optional correlation identifiers if provided
-        if self.person_bio is not None:
-            result["person_bio"] = self.person_bio
-        if self.organization is not None:
-            result["organization"] = self.organization
+        })
             
         return result
         
@@ -254,16 +257,24 @@ class SearchResult:
             
             events.append(event)
         
+        # Build summary with person_bio and organization first
+        summary = {}
+        if self.person_bio is not None:
+            summary["personBio"] = self.person_bio
+        if self.organization is not None:
+            summary["organization"] = self.organization
+        
+        # Add the rest of the summary fields
+        summary.update({
+            "searchName": self.name,
+            "totalMatches": len(self.alerts),
+            "recordsChecked": self.records_checked,
+            "lastUpdate": self.last_update.isoformat() if self.last_update else None
+        })
+        
         return {
             "events": events,
-            "summary": {
-                "searchName": self.name,
-                "totalMatches": len(self.alerts),
-                "recordsChecked": self.records_checked,
-                "lastUpdate": self.last_update.isoformat() if self.last_update else None,
-                "personBio": self.person_bio,
-                "organization": self.organization
-            }
+            "summary": summary
         }
 
 def normalize_name(name: str) -> str:
