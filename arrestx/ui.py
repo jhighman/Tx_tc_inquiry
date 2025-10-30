@@ -36,7 +36,8 @@ def setup_logging(level: str = "INFO") -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-def search_handler(name: str, force_update: bool = False, person_bio: str = "", organization: str = "", enterprise_format: bool = False) -> Tuple[str, str]:
+def search_handler(name: str, force_update: bool = False, person_bio: str = "", organization: str = "",
+                  sponsor_id: str = "", webhook_url: str = "", enterprise_format: bool = False) -> Tuple[str, str]:
     """
     Handle search requests.
     
@@ -45,6 +46,8 @@ def search_handler(name: str, force_update: bool = False, person_bio: str = "", 
         force_update: Force update of the report
         person_bio: Optional person bio identifier for correlation
         organization: Optional organization identifier for correlation
+        sponsor_id: Optional sponsor identifier
+        webhook_url: Optional webhook URL for callback
         enterprise_format: Whether to use enterprise event format
         
     Returns:
@@ -60,9 +63,12 @@ def search_handler(name: str, force_update: bool = False, person_bio: str = "", 
         # Convert empty strings to None for optional parameters
         person_bio_param = person_bio.strip() if person_bio.strip() else None
         organization_param = organization.strip() if organization.strip() else None
+        sponsor_id_param = sponsor_id.strip() if sponsor_id.strip() else None
+        webhook_url_param = webhook_url.strip() if webhook_url.strip() else None
         
         # Search for the name
-        result = search_name(name, config, force_update, person_bio_param, organization_param)
+        result = search_name(name, config, force_update, person_bio_param, organization_param,
+                           sponsor_id_param, webhook_url_param)
         
         # Generate alerts HTML
         alerts_html = generate_alerts_html(result)
@@ -137,10 +143,22 @@ def create_ui() -> gr.Blocks:
                         placeholder="Optional identifier for correlation",
                         info="Optional: Person bio identifier for tracking by calling system"
                     )
+                    sponsor_id_input = gr.Textbox(
+                        label="Sponsor ID",
+                        placeholder="Optional sponsor identifier",
+                        info="Optional: Sponsor identifier for tracking"
+                    )
+                
+                with gr.Row():
                     organization_input = gr.Textbox(
                         label="Organization",
                         placeholder="Optional organization identifier",
                         info="Optional: Organization identifier for correlation"
+                    )
+                    webhook_url_input = gr.Textbox(
+                        label="Webhook URL",
+                        placeholder="Optional webhook callback URL",
+                        info="Optional: URL to receive webhook callbacks when matches are found"
                     )
                 
                 with gr.Row():
@@ -165,7 +183,7 @@ def create_ui() -> gr.Blocks:
         
         search_button.click(
             fn=search_handler,
-            inputs=[name_input, force_update, person_bio_input, organization_input, enterprise_format],
+            inputs=[name_input, force_update, person_bio_input, organization_input, sponsor_id_input, webhook_url_input, enterprise_format],
             outputs=[alerts_output, json_output]
         )
         

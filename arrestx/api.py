@@ -18,6 +18,52 @@ from arrestx.web import process_daily_report
 
 logger = logging.getLogger(__name__)
 
+
+def send_webhook_callback(result: 'SearchResult', webhook_url: str) -> bool:
+    """
+    Send webhook callback with search results.
+    
+    Args:
+        result: Search result to send
+        webhook_url: URL to send the webhook to
+        
+    Returns:
+        True if webhook was sent successfully, False otherwise
+    """
+    try:
+        import requests
+        
+        # Prepare webhook payload
+        payload = {
+            "sponsorId": result.sponsor_id,
+            "personBioId": result.person_bio,
+            "searchName": result.name,
+            "totalMatches": len(result.alerts),
+            "recordsChecked": result.records_checked,
+            "lastUpdate": result.last_update.isoformat() if result.last_update else None,
+            "alerts": [alert.to_dict() for alert in result.alerts],
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+        }
+        
+        # Send webhook
+        response = requests.post(
+            webhook_url,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            logger.info(f"Webhook sent successfully to {webhook_url}")
+            return True
+        else:
+            logger.warning(f"Webhook failed with status {response.status_code}: {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to send webhook to {webhook_url}: {e}")
+        return False
+
 class Alert:
     """Alert for a name match in arrest records."""
     
@@ -49,13 +95,17 @@ class SearchResult:
     def __init__(self, name: str, alerts: List[Alert], records_checked: int,
                  last_update: Optional[datetime.date] = None,
                  person_bio: Optional[str] = None,
-                 organization: Optional[str] = None):
+                 organization: Optional[str] = None,
+                 sponsor_id: Optional[str] = None,
+                 webhook_url: Optional[str] = None):
         self.name = name
         self.alerts = alerts
         self.records_checked = records_checked
         self.last_update = last_update
         self.person_bio = person_bio
         self.organization = organization
+        self.sponsor_id = sponsor_id
+        self.webhook_url = webhook_url
         
     def to_dict(self) -> Dict[str, Any]:
         """Convert search result to dictionary."""
@@ -66,6 +116,8 @@ class SearchResult:
             result["person_bio"] = self.person_bio
         if self.organization is not None:
             result["organization"] = self.organization
+        if self.sponsor_id is not None:
+            result["sponsor_id"] = self.sponsor_id
         
         # Add the rest of the fields
         result.update({
@@ -93,7 +145,6 @@ class SearchResult:
         
         # Generate unique IDs
         event_id = f"EVT-{uuid.uuid4().hex[:15].upper()}"
-        audit_id = str(uuid.uuid4())
         
         # Base event structure
         events = []
@@ -117,13 +168,11 @@ class SearchResult:
             event = {
                 "_id": f"EVT-{uuid.uuid4().hex[:15].upper()}",
                 "providerInfo": {
-                    "audit": {"$ref": "etsAuditTrail", "$id": audit_id},
                     "dataProviderId": "201",  # Texas Extract provider ID
                     "serviceName": "arrestSearch",
                     "searchType": "CRIMINAL"
                 },
                 "personBio": {"$ref": "person_bio", "$id": self.person_bio} if self.person_bio else None,
-                "organization": self.organization,
                 "aliasMatch": {
                     "fromIdentityValue": self.name,
                     "entity": "com.etx.dto.AliasDTO",
@@ -198,7 +247,6 @@ class SearchResult:
                     "source_type": "EXTERNAL",
                     "verification_status": "UNVERIFIED",
                     "sources": ["Tarrant County Sheriff's Office"],
-                    "auditId": audit_id,
                     "_class": "com.etx.scoring.domain.ArrestCharge"
                 },
                 "metadata": {
@@ -221,31 +269,11 @@ class SearchResult:
                     "className": "Criminal",
                     "sources": []
                 },
-                "selectedDTOAttributes": [
-                    "bookingDate", "bookingNbr", "bookingSid",
-                    "sourceState", "sourceCounty", "sourceAddress",
-                    "sourceCity", "sourceZip", "sourceDesc",
-                    "offenderId"
-                ],
-                "hashString": str(hash(f"{alert.booking_no}{alert.identifier}")),
                 "recordType": "ACTIVE",
-                "eventWorkFlow": {
-                    "_id": f"EVE-WF-{uuid.uuid4().hex[:15].upper()}",
-                    "event": {"$ref": "events", "$id": event_id},
-                    "status": "PUBLISHED",
-                    "publishedDate": datetime.utcnow().isoformat() + "Z",
-                    "updatedBy": "texas-extract@system.com",
-                    "date_created": datetime.utcnow().isoformat() + "Z",
-                    "last_update": datetime.utcnow().isoformat() + "Z",
-                    "sources": []
-                },
-                "archived": False,
-                "packageId": f"PKG{uuid.uuid4().hex[:7].upper()}",
                 "date_created": datetime.utcnow().isoformat() + "Z",
                 "last_update": datetime.utcnow().isoformat() + "Z",
                 "source_type": "EXTERNAL",
                 "sources": [],
-                "auditId": audit_id,
                 "_class": "com.etx.scoring.domain.CeEventEntity"
             }
             
@@ -257,12 +285,12 @@ class SearchResult:
             
             events.append(event)
         
-        # Build summary with person_bio and organization first
+        # Build summary with identifiers first
         summary = {}
         if self.person_bio is not None:
             summary["personBio"] = self.person_bio
-        if self.organization is not None:
-            summary["organization"] = self.organization
+        if self.sponsor_id is not None:
+            summary["sponsorId"] = self.sponsor_id
         
         # Add the rest of the summary fields
         summary.update({
@@ -432,22 +460,27 @@ def ensure_current_report(cfg: Config) -> bool:
         return True
     
     # Get the URL from config or use default
-    url = getattr(cfg.web_retrieval, "url", 
+    url = getattr(cfg.web_retrieval, "url",
                  "https://cjreports.tarrantcounty.com/Reports/JailedInmates/FinalPDF/01.PDF")
     
     # Process the daily report
     result = process_daily_report(url, cfg)
     
-    # Check if the report was processed successfully
-    if result.get("status") == "success":
-        logger.info("Successfully updated report")
+    # Check if the report was processed successfully or if we fell back to local
+    status = result.get("status")
+    if status in ["success", "fallback_to_local", "not_modified"]:
+        if status == "fallback_to_local":
+            logger.warning(f"Using local file due to network issues: {result.get('message')}")
+        else:
+            logger.info(f"Report processing completed: {result.get('message')}")
         return True
     else:
-        logger.error(f"Failed to update report: {result.get('error')}")
+        logger.error(f"Failed to update report: {result.get('message', 'Unknown error')}")
         return False
 
 def search_name(name: str, cfg: Config, force_update: bool = False,
-                person_bio: Optional[str] = None, organization: Optional[str] = None) -> SearchResult:
+                person_bio: Optional[str] = None, organization: Optional[str] = None,
+                sponsor_id: Optional[str] = None, webhook_url: Optional[str] = None) -> SearchResult:
     """
     Search for a name in arrest records.
     
@@ -457,6 +490,8 @@ def search_name(name: str, cfg: Config, force_update: bool = False,
         force_update: Force update of the report
         person_bio: Optional identifier for correlation by calling system
         organization: Optional organization identifier for correlation
+        sponsor_id: Optional sponsor identifier
+        webhook_url: Optional webhook URL for callback
         
     Returns:
         Search result
@@ -472,7 +507,7 @@ def search_name(name: str, cfg: Config, force_update: bool = False,
     report_path = Path("reports/01.PDF")
     if not report_path.exists():
         logger.error(f"Report not found: {report_path}")
-        return SearchResult(name, [], 0, current_date, person_bio, organization)
+        return SearchResult(name, [], 0, current_date, person_bio, organization, sponsor_id, webhook_url)
     
     # Parse the report
     records = parse_pdf(str(report_path), cfg)
@@ -496,6 +531,10 @@ def search_name(name: str, cfg: Config, force_update: bool = False,
                 alerts.append(alert)
     
     # Create the search result
-    result = SearchResult(name, alerts, len(records), current_date, person_bio, organization)
+    result = SearchResult(name, alerts, len(records), current_date, person_bio, organization, sponsor_id, webhook_url)
+    
+    # Send webhook callback if URL is provided
+    if webhook_url and alerts:
+        send_webhook_callback(result, webhook_url)
     
     return result

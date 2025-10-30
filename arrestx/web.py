@@ -5,6 +5,7 @@ Web retrieval module for fetching PDF reports from URLs.
 import os
 import re
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Union
@@ -102,6 +103,52 @@ def backup_file(file_path: str, report_date: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Failed to create backup: {e}")
         return None
+
+
+def fetch_pdf_with_retry(url: str, output_path: str, headers: Optional[Dict[str, str]] = None,
+                        max_retries: int = 3, backoff_factor: float = 1.0) -> Dict[str, Union[str, bool]]:
+    """
+    Fetch a PDF from a URL with retry logic and exponential backoff.
+    
+    Args:
+        url: URL to fetch
+        output_path: Path to save the PDF
+        headers: Optional request headers
+        max_retries: Maximum number of retry attempts
+        backoff_factor: Factor for exponential backoff
+        
+    Returns:
+        Dictionary with status information
+    """
+    last_exception = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            return fetch_pdf(url, output_path, headers)
+        except requests.exceptions.ConnectionError as e:
+            last_exception = e
+            if "Failed to resolve" in str(e) or "nodename nor servname provided" in str(e):
+                logger.warning(f"DNS resolution failed for {url} (attempt {attempt + 1}/{max_retries + 1}): {e}")
+            else:
+                logger.warning(f"Connection error for {url} (attempt {attempt + 1}/{max_retries + 1}): {e}")
+        except requests.exceptions.Timeout as e:
+            last_exception = e
+            logger.warning(f"Timeout error for {url} (attempt {attempt + 1}/{max_retries + 1}): {e}")
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            logger.warning(f"Request error for {url} (attempt {attempt + 1}/{max_retries + 1}): {e}")
+        except Exception as e:
+            last_exception = e
+            logger.warning(f"Unexpected error for {url} (attempt {attempt + 1}/{max_retries + 1}): {e}")
+        
+        # Don't sleep after the last attempt
+        if attempt < max_retries:
+            sleep_time = backoff_factor * (2 ** attempt)
+            logger.info(f"Retrying in {sleep_time:.1f} seconds...")
+            time.sleep(sleep_time)
+    
+    # All retries failed
+    raise WebRetrievalError(f"Failed to fetch PDF after {max_retries + 1} attempts: {last_exception}")
 
 
 def fetch_pdf(url: str, output_path: str, headers: Optional[Dict[str, str]] = None) -> Dict[str, Union[str, bool]]:
@@ -202,8 +249,48 @@ def process_daily_report(url: str, config: Config) -> Dict[str, Union[str, int]]
         # Check if file exists before fetching
         file_exists = os.path.exists(output_path)
         
-        # Fetch the PDF
-        fetch_result = fetch_pdf(url, output_path)
+        # Try to fetch the PDF with retry logic
+        fetch_result = None
+        try:
+            fetch_result = fetch_pdf_with_retry(url, output_path, max_retries=3, backoff_factor=2.0)
+        except WebRetrievalError as e:
+            logger.error(f"Failed to fetch PDF from {url}: {e}")
+            
+            # Check if we have a local file to work with
+            if file_exists:
+                logger.info(f"Network fetch failed, but local file exists: {output_path}")
+                fetch_result = {
+                    "status": "fallback_to_local",
+                    "message": "Using existing local file due to network failure",
+                    "modified": False
+                }
+            else:
+                # Check for alternative local files (like in out/ directory)
+                alternative_paths = [
+                    os.path.join("out", filename),
+                    os.path.join(".", filename),
+                    os.path.join("reports", "archive", filename)
+                ]
+                
+                local_file_found = False
+                for alt_path in alternative_paths:
+                    if os.path.exists(alt_path):
+                        logger.info(f"Network fetch failed, copying from alternative location: {alt_path}")
+                        try:
+                            shutil.copy2(alt_path, output_path)
+                            fetch_result = {
+                                "status": "fallback_to_local",
+                                "message": f"Copied from alternative location: {alt_path}",
+                                "modified": True
+                            }
+                            local_file_found = True
+                            break
+                        except Exception as copy_error:
+                            logger.warning(f"Failed to copy from {alt_path}: {copy_error}")
+                
+                if not local_file_found:
+                    # No local file available, re-raise the original error
+                    raise e
         
         # If file was not modified, return early
         if fetch_result["status"] == "not_modified":
@@ -211,8 +298,14 @@ def process_daily_report(url: str, config: Config) -> Dict[str, Union[str, int]]
             result["message"] = "Report not modified since last fetch"
             return result
         
+        # Handle fallback to local file scenario
+        if fetch_result["status"] == "fallback_to_local":
+            result["status"] = "fallback_to_local"
+            result["message"] = fetch_result["message"]
+            logger.warning(f"Using local file due to network issues: {output_path}")
+        
         # If file was modified and previously existed, create a backup
-        if file_exists:
+        if file_exists and fetch_result.get("modified", False):
             # Extract report date from the PDF
             report_date = extract_report_date(output_path)
             
@@ -234,9 +327,14 @@ def process_daily_report(url: str, config: Config) -> Dict[str, Union[str, int]]
         from arrestx.writers import write_outputs
         write_outputs(records, config)
         
-        # Update result
-        result["status"] = "success"
-        result["message"] = f"Processed {len(records)} records from {filename}"
+        # Update result - preserve fallback status if applicable
+        if result.get("status") != "fallback_to_local":
+            result["status"] = "success"
+            result["message"] = f"Processed {len(records)} records from {filename}"
+        else:
+            # Keep fallback status but update message to include processing info
+            result["message"] += f" - Processed {len(records)} records from {filename}"
+        
         result["record_count"] = len(records)
         
         # Store in database if configured
